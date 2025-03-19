@@ -23,29 +23,18 @@ const referralSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['registered', 'active', 'purchased'],
-    default: 'registered'
+    enum: ['pending', 'registered', 'purchased'],
+    default: 'pending'
   },
   rewards: [{
-    type: {
-      type: String,
-      enum: ['discount', 'credit', 'points'],
-      required: true
-    },
-    amount: {
-      type: Number,
-      required: true
-    },
+    _id: String,
+    orderId: String,
+    amount: Number,
     description: String,
-    createdAt: {
-      type: Date,
-      default: Date.now
-    },
-    used: {
-      type: Boolean,
-      default: false
-    },
-    usedAt: Date
+    type: String,
+    used: Boolean,
+    createdAt: Date,
+    expiresAt: Date
   }],
   createdAt: {
     type: Date,

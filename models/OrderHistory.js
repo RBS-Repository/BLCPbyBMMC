@@ -2,14 +2,13 @@ import mongoose from 'mongoose';
 
 const orderHistorySchema = new mongoose.Schema({
   orderId: {
-    type: String,
-    required: true,
-    index: true // Add index for faster lookups
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Order',
+    required: true
   },
-  userId: { 
+  userId: {
     type: String,
-    required: true,
-    index: true // Add index for faster lookups
+    required: true
   },
   customerName: {
     type: String,
@@ -97,7 +96,6 @@ const orderHistorySchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
-  // New fields to match the Order model
   trackingNumber: String,
   refundStatus: {
     type: String,
@@ -119,7 +117,20 @@ const orderHistorySchema = new mongoose.Schema({
       default: Date.now
     },
     sentBy: String
-  }]
+  }],
+  action: {
+    type: String,
+    required: true,
+    enum: ['status_update', 'payment_update', 'tracking_update', 'note_added', 'refund']
+  },
+  details: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now
+  }
 });
 
 const OrderHistory = mongoose.model('OrderHistory', orderHistorySchema);

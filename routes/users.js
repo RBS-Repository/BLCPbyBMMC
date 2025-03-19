@@ -5,6 +5,8 @@ const auth = require('../middleware/auth');
 const adminOnly = require('../middleware/adminOnly');
 const mongoose = require('mongoose');
 const ReferralCode = require('../models/ReferralCode.js');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 
 // Delete user
 router.delete('/:id', auth, adminOnly, async (req, res) => {
@@ -169,6 +171,78 @@ router.get('/:userId/referral-code', auth, async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching referral code:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Login endpoint that generates JWT
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    // Validate user credentials (example - modify for your database)
+    // const user = await User.findOne({ email });
+    const user = { id: '123', email: email, name: 'Test User' }; // Replace with actual user lookup
+    
+    // For demo purposes - in real app, verify password with bcrypt
+    // const isMatch = await bcrypt.compare(password, user.password);
+    const isMatch = true; // Replace with actual password verification
+    
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    // Create JWT payload
+    const payload = {
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name
+      }
+    };
+    
+    // Sign the JWT
+    jwt.sign(
+      payload,
+      process.env.JWT_SECRET,
+      { 
+        expiresIn: '24h',
+        algorithm: 'HS256'  // Explicitly set algorithm
+      },
+      (err, token) => {
+        if (err) throw err;
+        res.json({ token });
+      }
+    );
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Set user account status (active/disabled)
+router.post('/set-account-status', auth, async (req, res) => {
+  try {
+    const { userId, isActive } = req.body;
+    
+    // Only allow users to disable their own account or admins to change any account
+    if (req.user.uid !== userId && !req.user.admin) {
+      return res.status(403).json({ error: 'Unauthorized to modify other user accounts' });
+    }
+    
+    // Update user status in Firebase Auth
+    await admin.auth().updateUser(userId, {
+      disabled: !isActive
+    });
+    
+    // Update user's status in Firestore as well
+    await admin.firestore().collection('users').doc(userId).update({
+      isActive: isActive
+    });
+    
+    res.json({ success: true, message: 'User status updated successfully' });
+  } catch (error) {
+    console.error('Error updating user status:', error);
     res.status(500).json({ error: error.message });
   }
 });

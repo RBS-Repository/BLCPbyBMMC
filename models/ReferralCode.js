@@ -9,8 +9,11 @@ const referralCodeSchema = new mongoose.Schema({
   code: {
     type: String,
     required: true,
-    unique: true
+    unique: true,
+    uppercase: true
   },
+  userName: String,
+  userEmail: String,
   uses: {
     type: Number,
     default: 0
@@ -25,6 +28,7 @@ const referralCodeSchema = new mongoose.Schema({
   }]
 });
 
-const ReferralCode = mongoose.model('ReferralCode', referralCodeSchema);
+// Create the model if it doesn't exist
+const ReferralCode = mongoose.models.ReferralCode || mongoose.model('ReferralCode', referralCodeSchema);
 
 export default ReferralCode; 

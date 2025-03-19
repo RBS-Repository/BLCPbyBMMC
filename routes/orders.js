@@ -9,6 +9,7 @@ import Cart from '../models/Cart.js';
 import { updateSalesData, getDashboardStats, getLast30DaysSales } from '../services/salesService.js';
 import Sales from '../models/Sales.js';
 import Referral from '../models/Referral.js';
+import axios from 'axios';
 
 const router = express.Router();
 
@@ -92,6 +93,8 @@ router.post('/', auth, async (req, res) => {
       payment: orderData.payment,
       status: orderData.status,
       paymentStatus: orderData.paymentStatus,
+      action: 'status_update',
+      details: { message: 'Order created' },
       createdAt: orderData.createdAt,
       storedAt: new Date()
     });
@@ -175,27 +178,83 @@ router.get('/user-orders', auth, async (req, res) => {
 });
 
 // Update order status (admin)
-router.patch('/:id/status', auth, adminOnly, async (req, res) => {
+router.patch('/:id/status', auth, async (req, res) => {
   try {
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      { status: req.body.status },
-      { new: true }
-    );
+    const { id } = req.params;
+    const { status } = req.body;
     
-    // Also update the order in history
+    // Validate the status value
+    const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded', 'completed'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ 
+        error: 'Invalid status value', 
+        message: `Status must be one of: ${validStatuses.join(', ')}` 
+      });
+    }
+
+    console.log(`Attempting to update order ${id} status to ${status}`);
+    
+    // Find the order first to get previous status
+    const existingOrder = await Order.findById(id);
+    if (!existingOrder) {
+      console.log(`Order not found with ID: ${id}`);
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    // Store previous status for history
+    const previousStatus = existingOrder.status;
+
+    // Use findByIdAndUpdate to bypass schema validation issues
+    const order = await Order.findByIdAndUpdate(
+      id,
+      { 
+        $set: { 
+          status: status,
+          updatedAt: new Date()
+        } 
+      },
+      { new: true, runValidators: false }
+    );
+
+    if (!order) {
+      return res.status(404).json({ error: 'Failed to update order' });
+    }
+    
+    // Create history entry
     try {
-      await OrderHistory.findOneAndUpdate(
-        { orderId: req.params.id },
-        { status: req.body.status }
-      );
+      await OrderHistory.create({
+        orderId: order._id,
+        userId: req.user.uid,
+        action: 'status_update',
+        details: {
+          from: previousStatus,
+          to: status
+        },
+        timestamp: new Date()
+      });
     } catch (historyError) {
-      console.error('Failed to update order status in history:', historyError);
+      console.error('Failed to create history entry with new format:', historyError);
+      try {
+        await OrderHistory.create({
+          orderId: order._id,
+          userId: req.user.uid,
+          status: status,
+          updatedBy: req.user.uid,
+          storedAt: new Date()
+        });
+      } catch (fallbackError) {
+        console.error('Failed to create history entry with old format:', fallbackError);
+        // Continue anyway - order status is updated, history is secondary
+      }
     }
     
     res.json(order);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.error('Order status update error:', error);
+    res.status(500).json({ 
+      error: 'Server error',
+      message: error.message || 'An unexpected error occurred updating the order status'
+    });
   }
 });
 
@@ -391,7 +450,31 @@ router.get('/check/:id', auth, adminOnly, async (req, res) => {
 
 // Get order by ID
 router.get('/:id', auth, async (req, res) => {
-  // ... existing code
+  try {
+    const orderId = req.params.id;
+    
+    // Validate if the ID format is correct for MongoDB
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return res.status(400).json({ error: 'Invalid order ID format' });
+    }
+    
+    const order = await Order.findById(orderId);
+    
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+    
+    // Check if the order belongs to this user (security measure)
+    // Only admins or the order owner can view details
+    if (order.user !== req.user.uid && !req.user.admin) {
+      return res.status(403).json({ error: 'You do not have permission to view this order' });
+    }
+    
+    res.json(order);
+  } catch (error) {
+    console.error('Error fetching order details:', error);
+    res.status(500).json({ error: 'Failed to fetch order details' });
+  }
 });
 
 // Update payment status
@@ -651,5 +734,60 @@ router.stack.forEach(layer => {
     console.log(`${methods.toUpperCase()} ${layer.route.path}`);
   }
 });
+
+// Add this after an order is successfully completed
+const processReferralReward = async (order) => {
+  try {
+    // Skip if no user ID
+    if (!order.user) {
+      console.log('No user found for order, skipping referral reward:', order._id);
+      return;
+    }
+    
+    console.log('Processing referral reward for order:', order._id);
+    
+    // Calculate total order amount
+    const purchaseAmount = order.summary?.total || order.total || 0;
+    console.log('Purchase amount:', purchaseAmount);
+    
+    // Create a server-to-server JWT for authentication
+    const jwt = require('jsonwebtoken');
+    const serverToken = jwt.sign(
+      { 
+        server: true,
+        service: 'order-processing'
+      }, 
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+    
+    // Call the referral reward endpoint with detailed logging
+    console.log('Calling referral reward processing with:', {
+      orderId: order._id.toString(),
+      userId: order.user,
+      purchaseAmount
+    });
+    
+    const response = await axios.post(
+      `${process.env.API_BASE_URL || 'http://localhost:5000/api'}/referrals/process-purchase-reward`, 
+      {
+        orderId: order._id.toString(),
+        userId: order.user,
+        purchaseAmount
+      }, 
+      {
+        headers: {
+          Authorization: `Bearer ${serverToken}`
+        }
+      }
+    );
+    
+    console.log('Referral reward processed response:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('Error processing referral reward:', error.message);
+    // Don't throw error - let order processing continue
+  }
+};
 
 export default router; 

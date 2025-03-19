@@ -20,6 +20,7 @@ import contentRoutes from './routes/content.js';
 import faqRoutes from './routes/faq.js';
 import articlesRoutes from './routes/articles.js';
 import adminReferralsRoutes from './routes/admin/referrals.js';
+import categoriesRoutes from './routes/categories.js';
 
 // Load environment variables from a .env file (if exists)
 dotenv.config();
@@ -70,6 +71,35 @@ mongoose
     }).catch(err => {
       console.error('Error with Sales collection:', err);
     });
+
+    // Test MongoDB connection by inserting and retrieving a test document
+    mongoose.connection.once('open', async () => {
+      try {
+        console.log('\n==== Testing MongoDB Connection ====');
+        
+        // Create a temporary model for testing
+        const TestModel = mongoose.model('TestConnection', new mongoose.Schema({
+          message: String,
+          timestamp: { type: Date, default: Date.now }
+        }));
+        
+        // Try to insert a document
+        const testDoc = await TestModel.create({ message: 'Connection test' });
+        console.log('Test document created:', testDoc);
+        
+        // Try to retrieve the document
+        const retrievedDoc = await TestModel.findById(testDoc._id);
+        console.log('Test document retrieved:', retrievedDoc);
+        
+        // Clean up test document
+        await TestModel.findByIdAndDelete(testDoc._id);
+        console.log('Test document deleted');
+        
+        console.log('MongoDB connection test successful');
+      } catch (error) {
+        console.error('MongoDB connection test failed:', error);
+      }
+    });
   })
   .catch((err) => console.error("MongoDB connection error:", err));
 
@@ -108,6 +138,7 @@ app.use('/api/content', contentRoutes);
 app.use('/api/faq', faqRoutes);
 app.use('/api/articles', articlesRoutes);
 app.use('/api/admin/referrals', adminReferralsRoutes);
+app.use('/api/categories', categoriesRoutes);
 
 // Log mounted routes
 console.log('\nMounted routes:');

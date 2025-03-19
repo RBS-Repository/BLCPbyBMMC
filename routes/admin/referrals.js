@@ -213,4 +213,54 @@ router.post('/:id/rewards', auth, adminOnly, async (req, res) => {
   }
 });
 
+// GET comprehensive referral statistics
+router.get('/stats', auth, adminOnly, async (req, res) => {
+  try {
+    // Get all referrals from the database
+    const referrals = await Referral.find({});
+    
+    // Calculate total rewards across all referrals
+    let totalRewards = 0;
+    let totalReferredDiscounts = 0;
+    
+    referrals.forEach(referral => {
+      // Sum up rewards for referrers
+      if (referral.rewards && referral.rewards.length > 0) {
+        referral.rewards.forEach(reward => {
+          totalRewards += reward.amount || 0;
+        });
+      }
+      
+      // Sum up discounts for referred users
+      if (referral.referredDiscountAmount) {
+        totalReferredDiscounts += referral.referredDiscountAmount;
+      }
+    });
+    
+    // Count statistics
+    const totalReferrals = referrals.length;
+    const successfulReferrals = referrals.filter(r => r.status === 'purchased').length;
+    const pendingReferrals = referrals.filter(r => r.status === 'registered').length;
+    const activeReferrals = successfulReferrals;
+    const conversionRate = totalReferrals > 0 ? (successfulReferrals / totalReferrals) * 100 : 0;
+    
+    // Get unique count of referred users (some might have multiple referrals)
+    const uniqueReferredUsers = new Set(referrals.map(r => r.referredUserId)).size;
+    
+    res.json({
+      totalReferrals,
+      activeReferrals,
+      successfulReferrals,
+      pendingReferrals,
+      totalRewards,
+      totalReferredDiscounts,
+      conversionRate: parseFloat(conversionRate.toFixed(2)),
+      totalReferredUsers: uniqueReferredUsers
+    });
+  } catch (error) {
+    console.error('Error fetching referral stats:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router; 

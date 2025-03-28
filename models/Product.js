@@ -79,4 +79,17 @@ productSchema.set('toJSON', {
   }
 });
 
+// Add text index
+productSchema.index({
+  name: 'text',
+  description: 'text',
+  category: 'text'
+}, {
+  weights: {
+    name: 10,
+    category: 5,
+    description: 1
+  }
+});
+
 export default mongoose.model('Product', productSchema); 

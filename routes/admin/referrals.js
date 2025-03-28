@@ -84,17 +84,30 @@ router.get('/settings', auth, adminOnly, async (req, res) => {
     if (!settings) {
       // Create default settings if none exist
       settings = new ReferralSettings({
-        referrerDiscount: 10,
-        referredDiscount: 15,
         minimumPurchase: 50,
         maxReferralReward: 200,
-        expirationDays: 60
+        expirationDays: 30,
+        creditCalculation: 'percentage',
+        maxRewardPercentage: 5,
+        referredDiscount: 5,
+        currency: '₱'
       });
       
       await settings.save();
     }
     
-    res.json(settings);
+    // Map to frontend format
+    const frontendSettings = {
+      minimumPurchase: settings.minimumPurchase,
+      maxReferralReward: settings.maxReferralReward,
+      expirationDays: settings.expirationDays,
+      creditCalculation: settings.creditCalculation,
+      maxRewardPercentage: settings.maxRewardPercentage,
+      referredDiscount: settings.referredDiscount,
+      currency: settings.currency
+    };
+    
+    res.json(frontendSettings);
   } catch (error) {
     console.error('Error fetching referral settings:', error);
     res.status(500).json({ error: error.message });
@@ -105,15 +118,17 @@ router.get('/settings', auth, adminOnly, async (req, res) => {
 router.put('/settings', auth, adminOnly, async (req, res) => {
   try {
     const { 
-      referrerDiscount, 
-      referredDiscount, 
       minimumPurchase, 
       maxReferralReward, 
-      expirationDays 
+      expirationDays,
+      creditCalculation,
+      maxRewardPercentage,
+      referredDiscount,
+      currency
     } = req.body;
     
     // Validate input
-    if (referrerDiscount < 0 || referrerDiscount > 100 || 
+    if (maxRewardPercentage < 0 || maxRewardPercentage > 100 || 
         referredDiscount < 0 || referredDiscount > 100 ||
         minimumPurchase < 0 || maxReferralReward < 0 || expirationDays < 0) {
       return res.status(400).json({ error: 'Invalid settings values' });
@@ -123,17 +138,30 @@ router.put('/settings', auth, adminOnly, async (req, res) => {
     const settings = await ReferralSettings.findOneAndUpdate(
       {}, // Empty filter to match any document
       {
-        referrerDiscount,
-        referredDiscount,
         minimumPurchase,
         maxReferralReward,
         expirationDays,
+        creditCalculation,
+        maxRewardPercentage,
+        referredDiscount,
+        currency,
         updatedAt: new Date()
       },
       { new: true, upsert: true }
     );
     
-    res.json(settings);
+    // Map to frontend format
+    const frontendSettings = {
+      minimumPurchase: settings.minimumPurchase,
+      maxReferralReward: settings.maxReferralReward,
+      expirationDays: settings.expirationDays,
+      creditCalculation: settings.creditCalculation,
+      maxRewardPercentage: settings.maxRewardPercentage,
+      referredDiscount: settings.referredDiscount,
+      currency: settings.currency
+    };
+    
+    res.json(frontendSettings);
   } catch (error) {
     console.error('Error updating referral settings:', error);
     res.status(500).json({ error: error.message });

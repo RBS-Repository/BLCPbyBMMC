@@ -9,7 +9,9 @@ import Cart from '../models/Cart.js';
 import { updateSalesData, getDashboardStats, getLast30DaysSales } from '../services/salesService.js';
 import Sales from '../models/Sales.js';
 import Referral from '../models/Referral.js';
+import Reward from '../models/Reward.js';
 import axios from 'axios';
+import jwt from 'jsonwebtoken';
 
 const router = express.Router();
 
@@ -35,6 +37,18 @@ router.post('/', auth, async (req, res) => {
     if (!req.body.shipping?.address || !req.body.shipping?.city) {
       throw new Error('Missing required shipping information');
     }
+
+    const { 
+      shippingDetails, 
+      paymentMethod, 
+      items, 
+      subtotal, 
+      tax, 
+      shipping, 
+      total,
+      rewardId,     // New field for reward redemption
+      rewardAmount  // Amount of reward applied
+    } = req.body;
 
     const orderData = {
       ...req.body,
@@ -102,6 +116,27 @@ router.post('/', auth, async (req, res) => {
 
     // After successful order creation
     await Cart.deleteOne({ user: req.user.uid });
+
+    // If a reward was applied, include it in the order
+    if (rewardId && rewardAmount) {
+      // Save reward info with the order
+      orderData.rewardApplied = {
+        rewardId,
+        amount: rewardAmount
+      };
+      
+      // Double-check that the reward is actually used
+      await Referral.updateOne(
+        { 'rewards._id': rewardId },
+        { 
+          $set: { 
+            'rewards.$.used': true,
+            'rewards.$.redeemedAt': new Date(),
+            'rewards.$.redeemedAmount': rewardAmount
+          } 
+        }
+      );
+    }
 
     await session.commitTransaction();
     res.status(201).json(order);
@@ -503,6 +538,17 @@ router.patch('/:id/payment-status', auth, adminOnly, async (req, res) => {
     // If order is marked as paid, update sales data
     if (status === 'paid') {
       await updateSalesData(updatedOrder);
+      
+      // Also process referral rewards
+      try {
+        await processReferralReward(updatedOrder);
+        
+        // Automatically save the reward to MongoDB for redemption
+        await saveReferralRewardToMongoDB(updatedOrder);
+      } catch (rewardError) {
+        console.error('Error processing rewards:', rewardError);
+        // Don't block the payment status update
+      }
     }
     
     res.json(updatedOrder);
@@ -751,7 +797,6 @@ const processReferralReward = async (order) => {
     console.log('Purchase amount:', purchaseAmount);
     
     // Create a server-to-server JWT for authentication
-    const jwt = require('jsonwebtoken');
     const serverToken = jwt.sign(
       { 
         server: true,
@@ -787,6 +832,63 @@ const processReferralReward = async (order) => {
   } catch (error) {
     console.error('Error processing referral reward:', error.message);
     // Don't throw error - let order processing continue
+  }
+};
+
+// Updated function to use MongoDB models instead of Firestore
+const saveReferralRewardToMongoDB = async (order) => {
+  try {
+    if (!order.user) {
+      console.log('No user associated with this order, skipping reward creation');
+      return;
+    }
+    
+    // Get referrer information from Referral model instead of Firestore
+    const referralInfo = await Referral.findOne({ referredUserId: order.user });
+    
+    if (!referralInfo || !referralInfo.referrerId) {
+      console.log('User was not referred by anyone, skipping reward creation');
+      return;
+    }
+    
+    const referrerId = referralInfo.referrerId;
+    const orderAmount = order.summary?.total || order.total || 0;
+    
+    // Calculate 5% reward
+    const rewardAmount = orderAmount * 0.05;
+    
+    // Check if reward already exists for this order
+    const existingReward = await Reward.findOne({ purchaseId: order._id.toString() });
+    if (existingReward) {
+      console.log('Reward already exists for this order:', order._id);
+      return;
+    }
+    
+    // Create new reward
+    const reward = new Reward({
+      userId: referrerId,
+      referredUserId: order.user,
+      purchaseId: order._id.toString(),
+      amount: rewardAmount,
+      orderTotal: orderAmount,
+      status: 'pending',
+      description: `5% reward for referral purchase (Order #${order._id})`,
+      purchaseDate: order.createdAt,
+      createdAt: new Date()
+    });
+    
+    await reward.save();
+    
+    console.log('Automatically saved referral reward:', {
+      orderId: order._id,
+      referrerId,
+      amount: rewardAmount
+    });
+    
+    return reward;
+  } catch (error) {
+    console.error('Error saving referral reward to MongoDB:', error);
+    // Don't throw the error to prevent blocking the order update
   }
 };
 

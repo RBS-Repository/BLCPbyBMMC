@@ -5,6 +5,10 @@ import mongoose from 'mongoose';
 
 const router = express.Router();
 
+// Create indexes
+Cart.collection.createIndex({ userId: 1 }, { unique: true });
+Cart.collection.createIndex({ 'products.productId': 1 });
+
 // Get user's cart
 router.get('/', auth, async (req, res) => {
   try {

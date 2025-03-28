@@ -9,8 +9,25 @@ const router = express.Router();
 // GET all products
 router.get('/', async (req, res) => {
   try {
-    const products = await Product.find({});
-    console.log(`Found ${products.length} products`);
+    const { search, category } = req.query;
+    const query = { status: 'active' };
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (category && category !== 'all') {
+      query.category = category;
+    }
+
+    const products = await Product.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
     res.json(products);
   } catch (error) {
     console.error("Error fetching products:", error);

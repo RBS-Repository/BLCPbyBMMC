@@ -3,7 +3,9 @@ import { auth } from '../middleware/auth.js';
 import admin from '../config/firebase-admin.js';
 import mongoose from 'mongoose';
 import Referral from '../models/Referral.js';
-import db from '../config/firebase-admin.js';
+import ReferralCode from '../models/ReferralCode.js';
+import User from '../models/User.js';
+import Setting from '../models/Setting.js';
 
 const router = express.Router();
 
@@ -87,25 +89,13 @@ router.post('/record', auth, async (req, res) => {
     // 4. Create rewards for both users
     const batch = admin.firestore().batch();
     
-    // Referrer reward (existing)
+    // Referrer reward
     const referrerRewardRef = admin.firestore().collection('userRewards').doc();
     batch.set(referrerRewardRef, {
       userId: referrerId,
       type: 'referral',
       amount: settings.referrerDiscount,
       description: `Referral signup bonus for ${newUserEmail}`,
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-      used: false,
-      createdAt: new Date()
-    });
-
-    // New user reward (added)
-    const newUserRewardRef = admin.firestore().collection('userRewards').doc();
-    batch.set(newUserRewardRef, {
-      userId: newUserId,
-      type: 'signup',
-      amount: settings.referredDiscount,
-      description: `Signup bonus from referral by ${referrerData.email}`,
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
       used: false,
       createdAt: new Date()
@@ -125,8 +115,8 @@ router.post('/record', auth, async (req, res) => {
 
     const newUserRef = admin.firestore().collection('users').doc(newUserId);
     batch.update(newUserRef, {
-      referralSignupBonus: admin.firestore.FieldValue.increment(settings.referredDiscount),
-      hasReferralBonus: true
+      referredBy: referrerId,
+      referredByDate: new Date().toISOString()
     });
 
     await batch.commit();
@@ -185,14 +175,36 @@ router.post('/process-purchase-reward', auth, async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
     
-    // Fetch referral settings
-    const settingsDoc = await db.collection('settings').doc('referrals').get();
-    const settings = settingsDoc.exists ? settingsDoc.data() : {
-      creditCalculation: 'percentage',
-      maxRewardPercentage: 25,
-      minimumPurchase: 50,
-      maxReferralReward: 200
-    };
+    // Fetch referral settings from MongoDB
+    let settings;
+    try {
+      const ReferralSettings = mongoose.model('ReferralSettings');
+      const settingsDoc = await ReferralSettings.findOne();
+      
+      if (settingsDoc) {
+        settings = settingsDoc;
+      } else {
+        // If not found in MongoDB, fetch from Firestore
+        const firebaseSettingsDoc = await admin.firestore().collection('settings').doc('referrals').get();
+        settings = firebaseSettingsDoc.exists ? firebaseSettingsDoc.data() : {
+          creditCalculation: 'percentage',
+          maxRewardPercentage: 5,
+          minimumPurchase: 50,
+          maxReferralReward: 200,
+          expirationDays: 30
+        };
+      }
+    } catch (err) {
+      console.error('Error fetching referral settings:', err);
+      // Use default settings if both MongoDB and Firestore fail
+      settings = {
+        creditCalculation: 'percentage',
+        maxRewardPercentage: 5,
+        minimumPurchase: 50,
+        maxReferralReward: 200,
+        expirationDays: 30
+      };
+    }
     
     // Check if purchase meets minimum amount
     if (purchaseAmount < settings.minimumPurchase) {
@@ -203,9 +215,9 @@ router.post('/process-purchase-reward', auth, async (req, res) => {
       });
     }
     
-    // Find if user was referred by someone
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (!userDoc.exists || !userDoc.data().referredBy) {
+    // Find if user was referred by someone using MongoDB
+    const referral = await Referral.findOne({ referredUserId: userId });
+    if (!referral || !referral.referrerId) {
       return res.status(200).json({ 
         success: true, 
         message: 'User was not referred by anyone',
@@ -213,7 +225,7 @@ router.post('/process-purchase-reward', auth, async (req, res) => {
       });
     }
     
-    const referrerId = userDoc.data().referredBy;
+    const referrerId = referral.referrerId;
     
     // Calculate reward amount
     let rewardAmount = 0;
@@ -249,31 +261,27 @@ router.post('/process-purchase-reward', auth, async (req, res) => {
     };
     
     // Save the reward to the database
-    const rewardRef = await db.collection('referralRewards').add(reward);
+    const rewardId = new mongoose.Types.ObjectId(); // Generate a new MongoDB ID
     
-    // Update MongoDB referral record if needed
-    try {
-      const Referral = mongoose.model('Referral');
-      await Referral.findOneAndUpdate(
-        { referrerId, referredUserId: userId },
-        { 
-          $set: { status: 'purchased' },
-          $push: { rewards: { ...reward, _id: rewardRef.id } }
-        },
-        { upsert: true }
-      );
-    } catch (error) {
-      console.error('Error updating MongoDB referral:', error);
-      // Continue anyway since the Firestore record is more important
-    }
+    // Update MongoDB referral record
+    const updatedReferral = await Referral.findOneAndUpdate(
+      { referrerId, referredUserId: userId },
+      { 
+        $set: { status: 'purchased' },
+        $push: { rewards: { ...reward, _id: rewardId } }
+      },
+      { upsert: true, new: true }
+    );
     
     return res.status(200).json({ 
       success: true, 
-      message: 'Referral reward created successfully',
+      message: 'Referral reward generated successfully',
       rewardGenerated: true,
       reward: {
-        id: rewardRef.id,
-        ...reward
+        id: rewardId,
+        amount: rewardAmount,
+        referrerId: referrerId,
+        userId: userId
       }
     });
   } catch (error) {
@@ -321,6 +329,114 @@ router.post('/create-code', auth, async (req, res) => {
   } catch (error) {
     console.error('Error creating referral code:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Add this endpoint to handle reward redemption
+router.post('/rewards/redeem', auth, async (req, res) => {
+  try {
+    const { rewardId, cartTotal } = req.body;
+    const userId = req.user.uid;
+    
+    // Find the reward and verify it belongs to the user
+    const referral = await Referral.findOne({
+      referrerId: userId,
+      'rewards._id': rewardId,
+      'rewards.used': false,
+      'rewards.expiresAt': { $gt: new Date() }
+    });
+    
+    if (!referral) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Reward not found or already used' 
+      });
+    }
+    
+    // Find the specific reward
+    const reward = referral.rewards.find(r => 
+      r._id.toString() === rewardId && !r.used && new Date(r.expiresAt) > new Date()
+    );
+    
+    if (!reward) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Reward not found or already used' 
+      });
+    }
+    
+    // Make sure reward amount is not greater than cart total
+    if (reward.amount > cartTotal) {
+      return res.status(400).json({
+        success: false,
+        message: 'Reward amount cannot exceed cart total'
+      });
+    }
+    
+    // Mark the reward as used
+    await Referral.updateOne(
+      { 
+        referrerId: userId,
+        'rewards._id': rewardId
+      },
+      { 
+        $set: { 
+          'rewards.$.used': true,
+          'rewards.$.redeemedAt': new Date(),
+          'rewards.$.redeemedAmount': reward.amount
+        } 
+      }
+    );
+    
+    // Return success
+    res.json({ 
+      success: true, 
+      message: 'Reward redeemed successfully',
+      amount: reward.amount
+    });
+    
+  } catch (error) {
+    console.error('Error redeeming reward:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Add this endpoint to fetch available rewards
+router.get('/rewards/available', auth, async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    console.log('Fetching rewards for user:', userId);
+    
+    // Find all referrals where the user is the referrer
+    const referrals = await Referral.find({ referrerId: userId });
+    
+    // Extract all unused, non-expired rewards
+    const now = new Date();
+    const availableRewards = [];
+    
+    referrals.forEach(referral => {
+      const validRewards = referral.rewards.filter(reward => 
+        !reward.used && new Date(reward.expiresAt) > now
+      );
+      
+      validRewards.forEach(reward => {
+        availableRewards.push({
+          _id: reward._id,
+          amount: reward.amount,
+          expiresAt: reward.expiresAt,
+          referredUser: referral.referredEmail || 'Anonymous'
+        });
+      });
+    });
+    
+    res.json({
+      success: true,
+      rewards: availableRewards
+    });
+    
+  } catch (error) {
+    console.error('Error in /rewards/available:', error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 

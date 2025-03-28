@@ -9,10 +9,20 @@ import fetch from 'node-fetch';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import Product from '../models/Product.js';
+import rateLimit from 'express-rate-limit';
 
 dotenv.config();
 
 const router = express.Router();
+
+// Create a rate limiter for the webhook endpoint
+const webhookRateLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 20, // limit each IP to 20 requests per windowMs
+  message: { error: 'Too many webhook requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 /**
  * Create a PayMongo payment intent
@@ -158,8 +168,18 @@ router.post('/source',
  */
 const verifyWebhookSignature = (payload, signature) => {
   try {
-    const hmac = crypto.createHmac('sha256', paymongoConfig.webhookSecret);
+    // Use environment variable for webhook secret
+    const webhookSecret = process.env.PAYMONGO_WEBHOOK_SECRET;
+    
+    if (!webhookSecret) {
+      console.error('Missing PAYMONGO_WEBHOOK_SECRET environment variable');
+      return false;
+    }
+    
+    const hmac = crypto.createHmac('sha256', webhookSecret);
     const digest = hmac.update(payload).digest('hex');
+    
+    // Use constant time comparison to prevent timing attacks
     return crypto.timingSafeEqual(
       Buffer.from(digest),
       Buffer.from(signature)
@@ -175,10 +195,36 @@ const verifyWebhookSignature = (payload, signature) => {
  * POST /api/payments/webhook
  */
 router.post('/webhook',
+  webhookRateLimiter, // Apply rate limiting to webhook endpoint
+  express.raw({type: 'application/json'}), // Raw body needed for signature verification
   async (req, res) => {
     try {
-      const event = req.body;
-      console.log('Received webhook event:', event.type);
+      // Get the PayMongo signature from header
+      const signature = req.headers['paymongo-signature'];
+      
+      if (!signature) {
+        console.error('Missing PayMongo signature header');
+        return res.status(401).json({ error: 'Missing signature header' });
+      }
+      
+      // Verify the webhook signature
+      const payload = req.body.toString(); // Get raw body as string
+      
+      if (!verifyWebhookSignature(payload, signature)) {
+        console.error('Invalid PayMongo signature');
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+      
+      // Parse the payload as JSON
+      const event = JSON.parse(payload);
+      console.log('Received webhook event type:', event.type);
+      
+      // Create a transaction log for audit trail
+      await createWebhookLog({
+        eventType: event.type,
+        eventId: event.data?.id,
+        payload: JSON.stringify(event)
+      });
 
       switch (event.type) {
         case 'source.chargeable':
@@ -201,6 +247,17 @@ router.post('/webhook',
     }
   }
 );
+
+// Helper function to create webhook log
+async function createWebhookLog(data) {
+  try {
+    // Implement logging to database or external service
+    console.log('Creating webhook log:', data.eventType, data.eventId);
+    // This would typically save to a database
+  } catch (error) {
+    console.error('Error creating webhook log:', error);
+  }
+}
 
 // Helper functions for webhook handling
 async function handleChargeableSource(data) {

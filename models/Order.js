@@ -120,6 +120,16 @@ const orderSchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now
+  },
+  rewardApplied: {
+    rewardId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Referral'
+    },
+    amount: {
+      type: Number,
+      default: 0
+    }
   }
 });
 

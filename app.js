@@ -14,13 +14,15 @@ import analyticsTestRoutes from './routes/analytics-test.js';
 import { WebSocketServer } from 'ws';
 import Order from './models/Order.js';
 import Sales from './models/Sales.js';
-import referralRoutes from './routes/referrals.js';
+import referralsRoutes from './routes/referrals.js';
 import settingsRoutes from './routes/settings.js';
 import contentRoutes from './routes/content.js';
 import faqRoutes from './routes/faq.js';
 import articlesRoutes from './routes/articles.js';
 import adminReferralsRoutes from './routes/admin/referrals.js';
 import categoriesRoutes from './routes/categories.js';
+import rewardsRoutes from './routes/rewards.js';
+import rateLimit from 'express-rate-limit';
 
 // Load environment variables from a .env file (if exists)
 dotenv.config();
@@ -132,13 +134,14 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/analytics-test', analyticsTestRoutes);
-app.use('/api/referrals', referralRoutes);
+app.use('/api/referrals', referralsRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/content', contentRoutes);
 app.use('/api/faq', faqRoutes);
 app.use('/api/articles', articlesRoutes);
 app.use('/api/admin/referrals', adminReferralsRoutes);
 app.use('/api/categories', categoriesRoutes);
+app.use('/api/rewards', rewardsRoutes);
 
 // Log mounted routes
 console.log('\nMounted routes:');
@@ -292,4 +295,13 @@ app.get('/api/health', (req, res) => {
     message: 'BLCP API is running',
     timestamp: new Date().toISOString() 
   });
-}); 
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again after 15 minutes'
+});
+
+// Apply to all API routes
+app.use('/api/', apiLimiter); 

@@ -9,8 +9,14 @@ const router = express.Router();
 // GET all products
 router.get('/', async (req, res) => {
   try {
-    const { search, category } = req.query;
-    const query = { status: 'active' };
+    const { search, category, showAll } = req.query;
+    const query = {};
+    
+    // Only filter by active status and stock for non-admin/public requests
+    if (!showAll) {
+      query.status = 'active';
+      query.stock = { $gt: 0 }; // Only show products with stock > 0
+    }
 
     if (search) {
       query.$or = [
@@ -35,10 +41,41 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET all products (for admin) - includes both active and inactive
+router.get('/admin', auth, adminOnly, async (req, res) => {
+  try {
+    const { search, category } = req.query;
+    const query = {};
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (category && category !== 'all') {
+      query.category = category;
+    }
+
+    const products = await Product.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json(products);
+  } catch (error) {
+    console.error("Error fetching products for admin:", error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // GET product by ID - Make it public
-router.get('/:id', async (req, res) => {  // Remove auth middleware if product details should be public
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const { showAll } = req.query; // Add this parameter for admin access
+    
     console.log('Attempting to fetch product with ID:', id);
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -52,6 +89,12 @@ router.get('/:id', async (req, res) => {  // Remove auth middleware if product d
     if (!product) {
       console.log('No product found with ID:', id);
       return res.status(404).json({ message: 'Product not found' });
+    }
+
+    // For non-admin users, check if product is active and in stock
+    if (!showAll && (product.status !== 'active' || product.stock <= 0)) {
+      console.log('Product exists but is inactive or out of stock:', id);
+      return res.status(404).json({ message: 'Product not available' });
     }
 
     res.json(product);

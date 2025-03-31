@@ -20,8 +20,10 @@ import contentRoutes from './routes/content.js';
 import faqRoutes from './routes/faq.js';
 import articlesRoutes from './routes/articles.js';
 import adminReferralsRoutes from './routes/admin/referrals.js';
+import adminUsersRoutes from './routes/admin/users.js';
 import categoriesRoutes from './routes/categories.js';
 import rewardsRoutes from './routes/rewards.js';
+import heroSlidesRoutes from './routes/heroSlides.js';
 import rateLimit from 'express-rate-limit';
 
 // Load environment variables from a .env file (if exists)
@@ -140,8 +142,10 @@ app.use('/api/content', contentRoutes);
 app.use('/api/faq', faqRoutes);
 app.use('/api/articles', articlesRoutes);
 app.use('/api/admin/referrals', adminReferralsRoutes);
+app.use('/api/admin/users', adminUsersRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/rewards', rewardsRoutes);
+app.use('/api/hero-slides', heroSlidesRoutes);
 
 // Log mounted routes
 console.log('\nMounted routes:');

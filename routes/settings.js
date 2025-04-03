@@ -157,4 +157,60 @@ router.put('/referrals', auth, adminOnly, async (req, res) => {
   }
 });
 
+// Contact Settings Endpoints
+router.get('/contact', auth, async (req, res) => {
+  try {
+    const contactSettingsDoc = await admin.firestore().collection('settings').doc('contact').get();
+    
+    if (!contactSettingsDoc.exists) {
+      return res.status(404).json({ message: 'Contact settings not found' });
+    }
+    
+    res.json(contactSettingsDoc.data());
+  } catch (error) {
+    console.error('Error getting contact settings:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+router.post('/contact/init', auth, adminOnly, async (req, res) => {
+  try {
+    const contactSettingsDoc = await admin.firestore().collection('settings').doc('contact').get();
+    
+    if (contactSettingsDoc.exists) {
+      return res.status(400).json({ message: 'Contact settings already exist' });
+    }
+    
+    const contactSettings = req.body;
+    
+    // Add timestamp and user who created
+    contactSettings.createdAt = new Date().toISOString();
+    contactSettings.createdBy = req.user.uid;
+    
+    await admin.firestore().collection('settings').doc('contact').set(contactSettings);
+    
+    res.status(201).json({ message: 'Contact settings initialized successfully' });
+  } catch (error) {
+    console.error('Error initializing contact settings:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+router.put('/contact', auth, adminOnly, async (req, res) => {
+  try {
+    const contactSettings = req.body;
+    
+    // Add timestamp and user who updated
+    contactSettings.updatedAt = new Date().toISOString();
+    contactSettings.updatedBy = req.user.uid;
+    
+    await admin.firestore().collection('settings').doc('contact').set(contactSettings, { merge: true });
+    
+    res.json({ message: 'Contact settings updated successfully' });
+  } catch (error) {
+    console.error('Error updating contact settings:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 export default router; 

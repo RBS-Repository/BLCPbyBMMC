@@ -10,12 +10,18 @@ export const updateSalesData = async (order) => {
       return null;
     }
     
-    // Extract order date
-    const orderDate = order.createdAt || new Date();
-    console.log('Order date:', orderDate);
-    const day = orderDate.getDate();
-    const month = orderDate.getMonth() + 1; // MongoDB months are 1-12
-    const year = orderDate.getFullYear();
+    // Use the current date (when payment is processed) instead of order creation date
+    const processingDate = new Date();
+    console.log('Order processing date:', processingDate);
+    const day = processingDate.getDate();
+    const month = processingDate.getMonth() + 1; // MongoDB months are 1-12
+    const year = processingDate.getFullYear();
+    
+    // Save original order date for reference
+    const originalOrderDate = order.createdAt || new Date();
+    const daysDifference = Math.floor((processingDate - originalOrderDate) / (1000 * 60 * 60 * 24));
+    
+    console.log(`Order created on ${originalOrderDate.toISOString()}, processed on ${processingDate.toISOString()}, ${daysDifference} days later`);
     
     // Format date to midnight for daily records
     const dateAtMidnight = new Date(year, month - 1, day);
@@ -26,7 +32,8 @@ export const updateSalesData = async (order) => {
       productId: item.product,
       name: item.name,
       quantity: item.quantity,
-      revenue: item.subtotal
+      revenue: item.subtotal,
+      orderDate: originalOrderDate // Store original order date with the product
     }));
     
     // Determine payment method
@@ -38,7 +45,7 @@ export const updateSalesData = async (order) => {
     paymentUpdate[`paymentMethods.${paymentMethod}.count`] = 1;
     paymentUpdate[`paymentMethods.${paymentMethod}.amount`] = order.summary.total;
     
-    // Find and update sales document for this day, or create if it doesn't exist
+    // Find and update sales document for the PROCESSING day, or create if it doesn't exist
     console.log('Attempting to update/create sales document for', year, month, day);
     const updatedSales = await Sales.findOneAndUpdate(
       { year, month, day },
@@ -52,7 +59,14 @@ export const updateSalesData = async (order) => {
           ...paymentUpdate
         },
         $push: {
-          productsSold: { $each: productsSold }
+          productsSold: { $each: productsSold },
+          processedOrders: { 
+            orderId: order._id,
+            total: order.summary.total,
+            orderDate: originalOrderDate,
+            processedDate: processingDate,
+            daysBetween: daysDifference
+          }
         },
         $set: {
           updatedAt: new Date()

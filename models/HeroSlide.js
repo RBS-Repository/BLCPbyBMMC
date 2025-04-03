@@ -6,6 +6,10 @@ const heroSlideSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  mobileImage: {
+    type: String,
+    trim: true
+  },
   title: {
     type: String,
     trim: true

@@ -203,8 +203,23 @@ router.get('/', auth, adminOnly, async (req, res) => {
     
     // Calculate growth percentages with safety checks
     const calculateGrowth = (current, previous) => {
-      if (previous === 0) return current > 0 ? 100 : 0;
-      return ((current - previous) / previous) * 100;
+      // If both values are zero, return 0 (no growth)
+      if (previous === 0 && current === 0) return 0;
+      
+      // If previous was zero but current is positive, that's 100% growth
+      if (previous === 0 && current > 0) return 100;
+      
+      // If previous was zero but current is negative, return -100%
+      if (previous === 0 && current < 0) return -100;
+      
+      // Normal case: calculate percentage change
+      const growth = ((current - previous) / Math.abs(previous)) * 100;
+      
+      // Limit extreme growth values to reasonable numbers
+      if (growth > 1000) return 1000; // Cap at 1000% growth
+      if (growth < -100) return -100; // Can't decline more than 100%
+      
+      return growth;
     };
     
     const revenueGrowth = calculateGrowth(totalRevenue, prevRevenueTotal);
@@ -233,6 +248,71 @@ router.get('/', auth, adminOnly, async (req, res) => {
           total: customerGrowth[0]?.newCustomers || 0,
           growth: Math.round(customersGrowth * 10) / 10
         }
+      },
+      // Delayed processing metrics
+      delayedProcessing: {
+        description: "Orders processed after their creation date",
+        data: await Sales.aggregate([
+          {
+            $match: {
+              date: { $gte: startDate, $lte: endDate },
+              processedOrders: { $exists: true, $ne: [] }
+            }
+          },
+          {
+            $unwind: '$processedOrders'
+          },
+          {
+            $group: {
+              _id: '$date',
+              totalDelayedAmount: { 
+                $sum: { 
+                  $cond: [{ $gt: ['$processedOrders.daysBetween', 0] }, '$processedOrders.total', 0] 
+                }
+              },
+              totalDelayedCount: { 
+                $sum: { 
+                  $cond: [{ $gt: ['$processedOrders.daysBetween', 0] }, 1, 0] 
+                }
+              },
+              averageDelay: { $avg: '$processedOrders.daysBetween' },
+              ordersWithDelay: {
+                $push: {
+                  $cond: [
+                    { $gt: ['$processedOrders.daysBetween', 0] },
+                    {
+                      orderId: '$processedOrders.orderId',
+                      total: '$processedOrders.total',
+                      orderDate: '$processedOrders.orderDate',
+                      processedDate: '$processedOrders.processedDate',
+                      daysBetween: '$processedOrders.daysBetween'
+                    },
+                    null
+                  ]
+                }
+              }
+            }
+          },
+          {
+            $project: {
+              _id: 1,
+              date: '$_id',
+              totalDelayedAmount: 1,
+              totalDelayedCount: 1,
+              averageDelay: { $round: ['$averageDelay', 1] },
+              ordersWithDelay: {
+                $filter: {
+                  input: '$ordersWithDelay',
+                  as: 'order',
+                  cond: { $ne: ['$$order', null] }
+                }
+              }
+            }
+          },
+          {
+            $sort: { date: 1 }
+          }
+        ])
       },
       // Product data
       topProducts,

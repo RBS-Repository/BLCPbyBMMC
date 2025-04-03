@@ -41,7 +41,20 @@ const salesSchema = new mongoose.Schema({
     },
     name: String,
     quantity: Number,
-    revenue: Number
+    revenue: Number,
+    orderDate: Date
+  }],
+  
+  // Track processed orders with their original creation dates
+  processedOrders: [{
+    orderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Order'
+    },
+    total: Number,
+    orderDate: Date,
+    processedDate: Date,
+    daysBetween: Number
   }],
   
   // Payment method breakdown

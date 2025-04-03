@@ -35,7 +35,8 @@ const app = express();
 app.use(cors({
   origin: [
     'https://blcp.vercel.app',         // Production domain
-    'http://localhost:3000'            // Local development
+    'http://localhost:3000',            // Local development
+    'https://www.blcpcorp.com'
   ],
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],

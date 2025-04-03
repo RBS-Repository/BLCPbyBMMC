@@ -21,7 +21,7 @@ router.get('/', async (req, res) => {
 // Create new slide (admin only)
 router.post('/', auth, adminOnly, async (req, res) => {
   try {
-    const { image, title, subtitle, cta, link } = req.body;
+    const { image, mobileImage, title, subtitle, cta, link } = req.body;
     
     if (!image) {
       return res.status(400).json({ error: 'Image is required' });
@@ -33,6 +33,7 @@ router.post('/', auth, adminOnly, async (req, res) => {
     
     const newSlide = new HeroSlide({
       image,
+      mobileImage,
       title,
       subtitle,
       cta,
@@ -52,7 +53,7 @@ router.post('/', auth, adminOnly, async (req, res) => {
 router.put('/:id', auth, adminOnly, async (req, res) => {
   try {
     const slideId = req.params.id;
-    const { image, title, subtitle, cta, link, order } = req.body;
+    const { image, mobileImage, title, subtitle, cta, link, order } = req.body;
     
     if (!image) {
       return res.status(400).json({ error: 'Image is required' });
@@ -60,6 +61,7 @@ router.put('/:id', auth, adminOnly, async (req, res) => {
     
     const updateData = {
       image,
+      mobileImage,
       title,
       subtitle,
       cta,

@@ -173,6 +173,23 @@ router.get('/contact', auth, async (req, res) => {
   }
 });
 
+// Public endpoint to get contact information
+router.get('/contact/public', async (req, res) => {
+  try {
+    const contactSettingsDoc = await admin.firestore().collection('settings').doc('contact').get();
+    
+    if (!contactSettingsDoc.exists) {
+      return res.status(404).json({ message: 'Contact settings not found' });
+    }
+    
+    // Return the contact information without any sensitive data
+    res.json(contactSettingsDoc.data());
+  } catch (error) {
+    console.error('Error getting public contact settings:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 router.post('/contact/init', auth, adminOnly, async (req, res) => {
   try {
     const contactSettingsDoc = await admin.firestore().collection('settings').doc('contact').get();

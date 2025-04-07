@@ -851,11 +851,28 @@ const saveReferralRewardToMongoDB = async (order) => {
       return;
     }
     
+    // Fetch referral settings from database
+    const settingsDoc = await mongoose.model('ReferralSettings').findOne() || {};
+    const maxRewardPercentage = settingsDoc.maxRewardPercentage || 5; // Default to 5% if not found
+    const minimumPurchase = settingsDoc.minimumPurchase || 50; // Default minimum purchase
+    const maxReferralReward = settingsDoc.maxReferralReward || 200; // Default max reward
+    
     const referrerId = referralInfo.referrerId;
     const orderAmount = order.summary?.total || order.total || 0;
     
-    // Calculate 5% reward
-    const rewardAmount = orderAmount * 0.05;
+    // Check if order meets the minimum purchase requirement
+    if (orderAmount < minimumPurchase) {
+      console.log(`Order amount ${orderAmount} does not meet minimum purchase requirement of ${minimumPurchase}`);
+      return;
+    }
+    
+    // Calculate reward based on settings
+    let rewardAmount = orderAmount * (maxRewardPercentage / 100);
+    
+    // Cap at maximum reward amount if needed
+    if (maxReferralReward > 0 && rewardAmount > maxReferralReward) {
+      rewardAmount = maxReferralReward;
+    }
     
     // Check if reward already exists for this order
     const existingReward = await Reward.findOne({ purchaseId: order._id.toString() });
@@ -872,7 +889,7 @@ const saveReferralRewardToMongoDB = async (order) => {
       amount: rewardAmount,
       orderTotal: orderAmount,
       status: 'pending',
-      description: `5% reward for referral purchase (Order #${order._id})`,
+      description: `${maxRewardPercentage}% reward for referral purchase (Order #${order._id})`,
       purchaseDate: order.createdAt,
       createdAt: new Date()
     });
@@ -882,7 +899,8 @@ const saveReferralRewardToMongoDB = async (order) => {
     console.log('Automatically saved referral reward:', {
       orderId: order._id,
       referrerId,
-      amount: rewardAmount
+      amount: rewardAmount,
+      percentage: maxRewardPercentage
     });
     
     return reward;

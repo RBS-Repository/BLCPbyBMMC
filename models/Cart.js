@@ -17,10 +17,31 @@ const cartSchema = new mongoose.Schema({
       ref: 'Product',
       required: true
     },
+    name: {
+      type: String,
+      required: false // Make it optional as it can come from the Product reference
+    },
+    price: {
+      type: Number,
+      required: false // Make it optional as it can come from the Product reference
+    },
     quantity: {
       type: Number,
       required: true,
       min: 1
+    },
+    // Add variation-related fields
+    variationSku: {
+      type: String,
+      required: false
+    },
+    variationOptions: {
+      type: Object,
+      required: false
+    },
+    variationDisplay: {
+      type: String,
+      required: false
     }
   }]
 }, { timestamps: true, strictPopulate: false });

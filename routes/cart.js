@@ -25,7 +25,7 @@ router.get('/', auth, async (req, res) => {
 // Add item to cart
 router.post('/', auth, async (req, res) => {
   try {
-    const { product, name, price, quantity } = req.body;
+    const { product, name, price, quantity, variationSku, variationOptions, variationDisplay } = req.body;
     
     // Validate required fields
     if (!product || !name || !price || !quantity) {
@@ -40,27 +40,59 @@ router.post('/', auth, async (req, res) => {
     // Find existing cart
     let cart = await Cart.findOne({ user: req.user.uid });
     
+    // Create the cart item with all data
+    const cartItem = {
+      product: new mongoose.Types.ObjectId(product),
+      name,
+      price: Number(price),
+      quantity
+    };
+    
+    // Add variation data if provided
+    if (variationSku) cartItem.variationSku = variationSku;
+    if (variationOptions) cartItem.variationOptions = variationOptions;
+    if (variationDisplay) cartItem.variationDisplay = variationDisplay;
+    
     if (!cart) {
       // Create new cart
       cart = new Cart({
         user: req.user.uid,
-        products: [{ product: new mongoose.Types.ObjectId(product), name, price: Number(price), quantity }]
+        products: [cartItem]
       });
     } else {
-      // Update existing cart
-      const existingItem = cart.products.find(
-        item => item.product.toString() === new mongoose.Types.ObjectId(product).toString()
-      );
+      // Check if this product with the same variation already exists
+      let existingItemIndex = -1;
       
-      if (existingItem) {
-        existingItem.quantity += quantity;
+      if (variationSku) {
+        // If we have a variationSku, find matching product+variationSku
+        existingItemIndex = cart.products.findIndex(item => 
+          item.product.toString() === new mongoose.Types.ObjectId(product).toString() && 
+          item.variationSku === variationSku
+        );
       } else {
-        cart.products.push({
-          product: new mongoose.Types.ObjectId(product),
-          name,
-          price: Number(price),
-          quantity
-        });
+        // If no variationSku but we have variationOptions, find by options
+        if (variationOptions && Object.keys(variationOptions).length > 0) {
+          existingItemIndex = cart.products.findIndex(item => 
+            item.product.toString() === new mongoose.Types.ObjectId(product).toString() && 
+            item.variationOptions && 
+            JSON.stringify(item.variationOptions) === JSON.stringify(variationOptions)
+          );
+        } else {
+          // No variation data, find by product ID only
+          existingItemIndex = cart.products.findIndex(item => 
+            item.product.toString() === new mongoose.Types.ObjectId(product).toString() && 
+            !item.variationSku && 
+            (!item.variationOptions || Object.keys(item.variationOptions).length === 0)
+          );
+        }
+      }
+      
+      if (existingItemIndex !== -1) {
+        // Update existing item
+        cart.products[existingItemIndex].quantity += quantity;
+      } else {
+        // Add new item
+        cart.products.push(cartItem);
       }
     }
 
@@ -72,15 +104,27 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// Update item quantity in cart
+// Update item quantity in cart with variation support
 router.put('/:id', auth, async (req, res) => {
   try {
-    const { quantity } = req.body;
+    const { quantity, variationSku } = req.body;
     const cart = await Cart.findOne({ user: req.user.uid });
     
-    const productIndex = cart.products.findIndex(p => 
-      p.product.toString() === req.params.id
-    );
+    let productIndex;
+    
+    if (variationSku) {
+      // If variation SKU provided, find the item with matching product ID and SKU
+      productIndex = cart.products.findIndex(p => 
+        p.product.toString() === req.params.id &&
+        p.variationSku === variationSku
+      );
+    } else {
+      // Otherwise find the item with just matching product ID and no variation
+      productIndex = cart.products.findIndex(p => 
+        p.product.toString() === req.params.id &&
+        !p.variationSku
+      );
+    }
     
     if (productIndex === -1) {
       return res.status(404).json({ error: 'Product not found in cart' });
@@ -96,11 +140,23 @@ router.put('/:id', auth, async (req, res) => {
   }
 });
 
-// Remove item from cart
+// Remove item from cart with variation support
 router.delete('/:id', auth, async (req, res) => {
   try {
+    const { variationSku } = req.query;
     let cart = await Cart.findOne({ user: req.user.uid });
-    cart.products = cart.products.filter(p => p.product != req.params.id);
+    
+    if (variationSku) {
+      // If variation SKU provided, only remove the specific variation
+      cart.products = cart.products.filter(p => 
+        !(p.product.toString() === req.params.id && p.variationSku === variationSku)
+      );
+    } else {
+      // Otherwise remove all items with the product ID
+      cart.products = cart.products.filter(p => 
+        p.product.toString() !== req.params.id
+      );
+    }
     
     const savedCart = await cart.save();
     const updatedCart = await savedCart.populate('products.product');

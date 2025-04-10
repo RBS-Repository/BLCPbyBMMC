@@ -24,6 +24,7 @@ import adminUsersRoutes from './routes/admin/users.js';
 import categoriesRoutes from './routes/categories.js';
 import rewardsRoutes from './routes/rewards.js';
 import heroSlidesRoutes from './routes/heroSlides.js';
+import spotlightRoutes from './routes/spotlight.js';
 import rateLimit from 'express-rate-limit';
 
 // Load environment variables from a .env file (if exists)
@@ -148,6 +149,7 @@ app.use('/api/admin/users', adminUsersRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/rewards', rewardsRoutes);
 app.use('/api/hero-slides', heroSlidesRoutes);
+app.use('/api/spotlight', spotlightRoutes);
 
 // Log mounted routes
 console.log('\nMounted routes:');

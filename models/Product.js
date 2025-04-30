@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import Category from './Category.js';
 
 // Create a variation option schema for individual variation values
 const variationOptionSchema = new mongoose.Schema({
@@ -70,10 +71,22 @@ const productSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // Replace simple category string with reference to Category model
     category: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Category',
+      required: true,
+    },
+    // Keep the original category name string for backward compatibility and display
+    categoryName: {
       type: String,
       required: true,
     },
+    // Add full category path data for hierarchical display
+    categoryPath: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Category'
+    }],
     stock: {
       type: Number,
       required: true,
@@ -124,20 +137,35 @@ const productSchema = new mongoose.Schema(
 );
 
 // Pre-save hook to generate SKUs for variations if they don't exist
-productSchema.pre('save', function(next) {
+productSchema.pre('save', async function(next) {
   console.log('Pre-save hook - images array:', {
     images: this.images,
     isArray: Array.isArray(this.images),
     length: this.images?.length || 0
   });
   
+  // If the category changed, update the categoryPath
+  if (this.isModified('category')) {
+    try {
+      this.categoryPath = await Category.getCategoryPath(this.category);
+      
+      // Also update the categoryName for backward compatibility
+      const category = await Category.findById(this.category);
+      if (category) {
+        this.categoryName = category.name;
+      }
+    } catch (error) {
+      console.error('Error updating category path:', error);
+    }
+  }
+  
   // If product has variations, generate SKUs for any that don't have them
   if (this.hasVariations && this.variations && this.variations.length > 0) {
     // Extract product name for the SKU prefix (using first 3 letters)
     const namePrefix = this.name.substring(0, 3).toUpperCase();
     
-    // Get product category (using first 2 letters)
-    const categoryPrefix = this.category.substring(0, 2).toUpperCase();
+    // Get product category (using first 2 letters of categoryName)
+    const categoryPrefix = this.categoryName ? this.categoryName.substring(0, 2).toUpperCase() : 'XX';
     
     // Use the first 4 characters of the product ID
     const idSuffix = this._id.toString().substr(-4);
@@ -188,11 +216,11 @@ productSchema.set('toJSON', {
 productSchema.index({
   name: 'text',
   description: 'text',
-  category: 'text'
+  categoryName: 'text' // Update index to include categoryName instead of category
 }, {
   weights: {
     name: 10,
-    category: 5,
+    categoryName: 5, // Update weight to reference categoryName
     description: 1
   }
 });
